@@ -77,6 +77,8 @@ public class StatusUpdateService : BackgroundService
                 _appData.AccessToken = newResponse.AccessToken;
                 _appData.RefreshToken = newResponse.RefreshToken;
                 _logger.LogInformation($"{ex.GetType()} - {ex.Message}");
+                
+                spotifyCLient = new SpotifyClient(_appData.AccessToken);
             }
             catch (APIException ex)
             {
