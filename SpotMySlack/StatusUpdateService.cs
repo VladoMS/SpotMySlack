@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Options;
+﻿using IF.Lastfm.Core.Api;
+using Microsoft.Extensions.Options;
 using SlackNet;
 using SpotifyAPI.Web;
 
@@ -16,9 +17,14 @@ public class StatusUpdateService : BackgroundService
 
     private readonly SpotifySettings _spotifySettings;
 
+    private readonly LastfmClient _lastfmClient;
+
+    private string _cachedLastFmMessage;
+
     public StatusUpdateService(ILogger<StatusUpdateService> logger,
         AppData appData,
         ISlackApiClient slackApiClient,
+        LastfmClient lastfmClient,
         IOptions<SlackSettings> slackSettings,
         IOptions<SpotifySettings> spotifySettings)
     {
@@ -27,6 +33,7 @@ public class StatusUpdateService : BackgroundService
         _slackApiClient = slackApiClient;
         _slackSettings = slackSettings.Value;
         _spotifySettings = spotifySettings.Value;
+        _lastfmClient = lastfmClient;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -38,7 +45,7 @@ public class StatusUpdateService : BackgroundService
             try
             {
                 var item = await spotifyCLient.Player.GetCurrentlyPlaying(new PlayerCurrentlyPlayingRequest());
-                if (item.IsPlaying && item.CurrentlyPlayingType == "track")
+                if (item != null && item.IsPlaying && item.CurrentlyPlayingType == "track")
                 {
                     var track = item.Item as FullTrack;
 
@@ -48,24 +55,30 @@ public class StatusUpdateService : BackgroundService
                     _logger.LogInformation($"Playing {string.Join(",", track.Artists.Select(x => x.Name).ToArray())} - {track.Name} {url}");
 
                     var status = Truncate($"{string.Join(",", track.Artists.Select(x => x.Name).ToArray())} - {track.Name}", 96);
-                    if (status.Length > 100)
-                    {
-                        
-                    }
                     await _slackApiClient.UserProfile.Set(new UserProfile()
                     {
-                        
                         StatusEmoji = ":rainbowpls:", StatusText = status
                     }, _slackSettings.UserId);
                 }
                 else
                 {
                     _logger.LogInformation("Nothing is playing");
-
-                    await _slackApiClient.UserProfile.Set(new UserProfile()
+                    try
                     {
-                        StatusEmoji = ":kumapls:", StatusText = $""
-                    }, _slackSettings.UserId);
+                        string message = await GetLastFMMessage();
+                        await _slackApiClient.UserProfile.Set(new UserProfile()
+                        {
+                            StatusEmoji = ":kumapls:", StatusText = message
+                        }, _slackSettings.UserId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, ex.Message);
+                        _ = _slackApiClient.UserProfile.Set(new UserProfile()
+                        {
+                            StatusEmoji = "", StatusText = ""
+                        }, _slackSettings.UserId).Result;   
+                    }
                 }
             }
             catch (APIUnauthorizedException ex)
@@ -93,6 +106,31 @@ public class StatusUpdateService : BackgroundService
 
             await Task.Delay(5000, stoppingToken);
         }
+    }
+    private async Task<string> GetLastFMMessage()
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(_cachedLastFmMessage))
+            {
+                return _cachedLastFmMessage;
+            }
+            var weeklyCharts = await _lastfmClient.User.GetWeeklyChartListAsync("vladoms");
+            if (!weeklyCharts.Any()) return "";
+            var lastWeek = weeklyCharts.Reverse().FirstOrDefault();
+            var topSongs = await _lastfmClient.User.GetWeeklyTrackChartAsync("vladoms", lastWeek.From, lastWeek.To);
+            var topSong = topSongs.Content.FirstOrDefault();
+            var message = $"Last week top song: {topSong.ArtistName} - {topSong.Name}";
+            _cachedLastFmMessage = message;
+            return message;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, ex.Message);;
+            return "";
+        }
+        
+        
     }
 
     public override void Dispose()

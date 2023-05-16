@@ -1,10 +1,8 @@
+using IF.Lastfm.Core.Api;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Options;
-using Newtonsoft.Json;
-using SlackNet;
 using SlackNet.Extensions.DependencyInjection;
 using SpotifyAPI.Web;
-using SpotifyAPI.Web.Http;
 using SpotMySlack;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -19,13 +17,12 @@ builder.Services.AddSlackNet(c =>
     c.UseApiToken(builder.Configuration.GetSection("Slack:Token").Value);
 
 });
+builder.Services.AddSingleton<LastfmClient>(f => new LastfmClient(
+    builder.Configuration.GetSection("LastFM:APIKey").Value,
+    builder.Configuration.GetSection("LastFM:SharedSecret").Value));
 
 var app = builder.Build();
 
-app.MapGet("/hello", async context =>
-{
-    await context.Response.WriteAsync("Hello World!");
-});
 app.MapGet("/", async (HttpContext context) =>
 {
     var appData = context.RequestServices.GetService<AppData>();
